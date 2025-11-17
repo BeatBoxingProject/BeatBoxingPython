@@ -8,8 +8,8 @@ import os
 # ====================================================================
 
 # --- Camera Stream URLs ---
-url_1 = "http://esp32-camera-01.local/stream"  # Left Camera
-url_2 = "http://esp32-camera-02.local/stream"  # Right Camera
+url_1 = "http://192.168.137.101/stream"  # Left Camera
+url_2 = "http://192.168.137.102/stream"  # Right Camera
 
 # --- Chessboard Configuration ---
 # Number of inner corners (horizontal, vertical)
