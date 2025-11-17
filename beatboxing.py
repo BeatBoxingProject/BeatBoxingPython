@@ -57,8 +57,14 @@ def find_target(frame):
 
 # --- 3. THE MAIN LOOP ---
 def main():
+    url = "http://192.168.137.118/stream"  # ESP32 IP
+
+    # Create a VideoCapture object
+    cap = cv2.VideoCapture(url)
+
+    # Using USB Webcam instead of ESP Stream:
     # Start capturing from the default webcam (usually '0')
-    cap = cv2.VideoCapture(1) # 0 = internal, 1 = webcam
+    #cap = cv2.VideoCapture(0) # 0 = internal, 1 = webcam
 
     if not cap.isOpened():
         print("Error: Cannot open camera")
