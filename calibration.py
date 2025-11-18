@@ -13,7 +13,7 @@ url_2 = "http://192.168.137.101/stream?framesize=13"
 
 # Check your board! You had (8, 5) in previous attempts.
 # Ensure this matches the INNER corners.
-CHECKERBOARD = (8, 5)
+CHECKERBOARD = (9, 6)
 SQUARE_SIZE_METERS = 0.025
 IMAGES_NEEDED = 25
 
