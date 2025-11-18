@@ -15,7 +15,7 @@ url_2 = "http://192.168.137.101/stream?framesize=13"
 # Ensure this matches the INNER corners.
 CHECKERBOARD = (9, 6)
 SQUARE_SIZE_METERS = 0.025
-IMAGES_NEEDED = 25
+IMAGES_NEEDED = 15
 
 # ====================================================================
 # --- 2. HELPERS & SETUP ---
