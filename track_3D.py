@@ -79,21 +79,62 @@ class CameraStream:
 # --- 3. HELPER FUNCTIONS ---
 # ====================================================================
 
-def load_calibration_data(filename):
+def load_calibration_data(filename, target_width, target_height):
+    """
+    Loads calibration data and SCALES it to match the target resolution.
+    """
     if not os.path.exists(filename):
         print(f"Error: Calibration file not found at {filename}")
         return None
+
     print(f"Loading calibration data from {filename}...")
     fs = cv2.FileStorage(filename, cv2.FILE_STORAGE_READ)
+
+    # Load raw data
     calib_data = {}
     keys = ['cameraMatrix1', 'distCoeffs1', 'cameraMatrix2', 'distCoeffs2',
             'R', 'T', 'R1', 'R2', 'P1', 'P2', 'Q', 'frame_width', 'frame_height']
     for key in keys:
-        calib_data[key] = fs.getNode(key).mat() if key not in ['frame_width', 'frame_height'] else fs.getNode(
-            key).real()
-    calib_data['frame_width'] = int(calib_data['frame_width'])
-    calib_data['frame_height'] = int(calib_data['frame_height'])
+        node = fs.getNode(key)
+        if node.isNone():
+            continue
+        calib_data[key] = node.mat() if key not in ['frame_width', 'frame_height'] else int(node.real())
+
     fs.release()
+
+    # --- SCALING LOGIC ---
+    orig_w = calib_data['frame_width']
+    orig_h = calib_data['frame_height']
+
+    if orig_w != target_width or orig_h != target_height:
+        print(f"⚠️ SCALING CALIBRATION: {orig_w}x{orig_h} -> {target_width}x{target_height}")
+
+        # Calculate scale factor (assuming aspect ratio is maintained)
+        scale = target_width / orig_w
+
+        # Scale the Camera Matrices (Intrinsic)
+        calib_data['cameraMatrix1'] *= scale
+        calib_data['cameraMatrix2'] *= scale
+
+        # Restore the bottom-right element to 1.0 (Homogeneous coordinates requirement)
+        calib_data['cameraMatrix1'][2, 2] = 1.0
+        calib_data['cameraMatrix2'][2, 2] = 1.0
+
+        # Scale the Projection Matrices (P1, P2) from stereoRectify
+        # P matrices are 3x4. We scale the first 3 columns.
+        calib_data['P1'] *= scale
+        calib_data['P2'] *= scale
+        calib_data['P1'][2, 2] = 1.0
+        calib_data['P2'][2, 2] = 1.0
+
+        # NOTE: distCoeffs, R, and T do NOT need scaling.
+
+        # Update the width/height in the dict
+        calib_data['frame_width'] = target_width
+        calib_data['frame_height'] = target_height
+    else:
+        print("Resolution matches calibration. No scaling needed.")
+
     return calib_data
 
 
@@ -121,38 +162,68 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"UDP Target set to: {UDP_IP}:{UDP_PORT}")
 
-    # --- LOAD CALIB ---
-    calib_data = load_calibration_data(CALIB_FILE)
-    if calib_data is None: return
-
-    mtx_l, dist_l = calib_data['cameraMatrix1'], calib_data['distCoeffs1']
-    mtx_r, dist_r = calib_data['cameraMatrix2'], calib_data['distCoeffs2']
-    R1, R2, P1, P2 = calib_data['R1'], calib_data['R2'], calib_data['P1'], calib_data['P2']
-    frame_shape = (calib_data['frame_width'], calib_data['frame_height'])
-
-    # --- RECTIFICATION MAPS ---
-    map_l_x, map_l_y = cv2.initUndistortRectifyMap(mtx_l, dist_l, R1, P1, frame_shape, cv2.CV_32FC1)
-    map_r_x, map_r_y = cv2.initUndistortRectifyMap(mtx_r, dist_r, R2, P2, frame_shape, cv2.CV_32FC1)
-
-    # --- START THREADED STREAMS ---
+    # --- 1. START THREADED STREAMS FIRST ---
+    # We must start them now to see what resolution the ESP32 is actually sending
     print("Starting Camera Threads...")
     cam_l = CameraStream(url_1, "Left")
     cam_r = CameraStream(url_2, "Right")
 
-    # Give threads a moment to connect
+    # Give threads a moment to connect and fill the buffer
     time.sleep(2.0)
+
+    # --- 2. GET ACTUAL RESOLUTION ---
+    print("Checking stream resolution...")
+    ret, temp_frame = cam_l.read()
+
+    # Retry loop in case cameras are slow to start
+    tries = 0
+    while not ret and tries < 10:
+        print(f"Waiting for frame... ({tries}/10)")
+        time.sleep(0.5)
+        ret, temp_frame = cam_l.read()
+        tries += 1
+
+    if not ret:
+        print("Error: Could not read frame from Left camera to determine resolution.")
+        cam_l.stop()
+        cam_r.stop()
+        return
+
+    stream_h, stream_w = temp_frame.shape[:2]
+    print(f"Detected Stream Resolution: {stream_w}x{stream_h}")
+
+    # --- 3. LOAD & SCALE CALIBRATION ---
+    # Pass the detected width/height to the loader so it scales the math
+    calib_data = load_calibration_data(CALIB_FILE, stream_w, stream_h)
+
+    if calib_data is None:
+        cam_l.stop()
+        cam_r.stop()
+        return
+
+    # Extract matrices
+    mtx_l, dist_l = calib_data['cameraMatrix1'], calib_data['distCoeffs1']
+    mtx_r, dist_r = calib_data['cameraMatrix2'], calib_data['distCoeffs2']
+    R1, R2, P1, P2 = calib_data['R1'], calib_data['R2'], calib_data['P1'], calib_data['P2']
+
+    # Use the detected shape for mapping
+    frame_shape = (stream_w, stream_h)
+
+    # --- 4. RECTIFICATION MAPS ---
+    print("Generating rectification maps...")
+    map_l_x, map_l_y = cv2.initUndistortRectifyMap(mtx_l, dist_l, R1, P1, frame_shape, cv2.CV_32FC1)
+    map_r_x, map_r_y = cv2.initUndistortRectifyMap(mtx_r, dist_r, R2, P2, frame_shape, cv2.CV_32FC1)
 
     print("\nTracking started. Press 'q' to quit.")
 
+    # --- 5. MAIN LOOP ---
     while True:
         try:
-            # 1. Get latest frames from threads (instantaneous)
+            # 1. Get latest frames from threads
             ret_l, frame_l = cam_l.read()
             ret_r, frame_r = cam_r.read()
 
             if not ret_l or not ret_r:
-                # Frames aren't ready yet, just skip this loop iteration
-                # The threads will reconnect automatically in the background
                 time.sleep(0.01)
                 continue
 
@@ -185,13 +256,12 @@ def main():
                 message = f"{x},{y},{z}"
                 sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
 
-                # Print
-                print(f"Sent: X:{x:.2f} Y:{y:.2f} Z:{z:.2f}")
+                # Print (Optional, comment out for speed)
+                # print(f"Sent: X:{x:.2f} Y:{y:.2f} Z:{z:.2f}")
 
             # 5. Display
             cv2.imshow('Rectified Left', rect_l)
             cv2.imshow('Rectified Right', rect_r)
-            # cv2.imshow('Mask', mask_l) # Optional, commented out to save performance
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
