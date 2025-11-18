@@ -4,9 +4,11 @@ import time
 
 # --- 1. CONFIGURATION ---
 # ... (your hsv_lower, hsv_upper, HIT_ZONE) ...
-hsv_lower = np.array([40, 100, 100])
-hsv_upper = np.array([80, 255, 255])
+hsv_lower = np.array([18, 101, 139])
+hsv_upper = np.array([157, 255, 255])
 HIT_ZONE = (200, 100, 400, 300)
+
+url = "http://192.168.137.101/stream"
 
 
 # --- 2. THE EXPANDABLE FUNCTION ---
@@ -48,8 +50,6 @@ def find_target(frame):
 
 # --- 3. THE MAIN LOOP ---
 def main():
-    # Use your .local address
-    url = "http://esp32-camera-01.local/stream"
     cap = cv2.VideoCapture(url)
 
     if cap.isOpened():
