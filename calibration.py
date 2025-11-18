@@ -8,8 +8,8 @@ import os
 # ====================================================================
 
 # --- Camera Stream URLs ---
-url_1 = "http://192.168.137.102/stream"  # Left Camera
-url_2 = "http://192.168.137.101/stream"  # Right Camera
+url_1 = "http://192.168.137.102/stream?framesize=13"  # Left Camera
+url_2 = "http://192.168.137.101/stream?framesize=13"  # Right Camera
 
 # --- Chessboard Configuration ---
 # Number of inner corners (horizontal, vertical)
