@@ -4,13 +4,14 @@ import time
 import os
 import socket
 from threading import Thread
+import math
 
 # ====================================================================
 # --- 1. CONFIGURATION ---
 # ====================================================================
 
-url_1 = "http://192.168.137.102/stream?framesize=8"  # Left Camera
-url_2 = "http://192.168.137.101/stream?framesize=8"  # Right Camera
+url_1 = "http://192.168.137.101/stream?framesize=8"  # Left Camera
+url_2 = "http://192.168.137.102/stream?framesize=8"  # Right Camera
 CALIB_FILE = "stereo_calib.yml"
 
 # Target Color
@@ -20,6 +21,13 @@ hsv_upper = np.array([79, 255, 255])
 # UDP Settings
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
+
+# --- NEW: TILT CORRECTION ---
+# Estimate how many degrees the cameras are angled DOWN from the horizon.
+# 0 = Looking straight forward (Horizontal)
+# 90 = Looking straight down (Vertical)
+# 45 = Typical ceiling mount angle
+CAMERA_TILT_ANGLE = 50  # <--- ADJUST THIS VALUE
 
 
 # ====================================================================
@@ -34,30 +42,21 @@ class CameraStream:
         self.ret, self.frame = self.stream.read()
         self.stopped = False
         self.reconnecting = False
-
-        # Start the thread to read frames from the video stream
-        # args=() means no arguments are passed to the update function
         self.t = Thread(target=self.update, args=())
-        self.t.daemon = True  # Thread dies when main program dies
+        self.t.daemon = True
         self.t.start()
 
     def update(self):
-        # This loops runs in the background constantly
         while True:
             if self.stopped:
                 self.stream.release()
                 return
-
-            # Try to read a frame
             ret, frame = self.stream.read()
-
             if ret:
-                # If successful, update the 'latest' frame
                 self.frame = frame
                 self.ret = True
                 self.reconnecting = False
             else:
-                # If failed, handle reconnection
                 self.ret = False
                 if not self.reconnecting:
                     print(f"Stream error on {self.name}. Reconnecting...")
@@ -67,7 +66,6 @@ class CameraStream:
                     self.stream = cv2.VideoCapture(self.src)
 
     def read(self):
-        # Return the most recent frame read
         return self.ret, self.frame
 
     def stop(self):
@@ -79,62 +77,63 @@ class CameraStream:
 # --- 3. HELPER FUNCTIONS ---
 # ====================================================================
 
+def apply_tilt_correction(x, y, z, angle_degrees):
+    """
+    Rotates the 3D point around the X-axis to compensate for camera tilt.
+    Converts 'Camera Space' to 'World Space'.
+    """
+    # Convert to radians
+    theta = math.radians(angle_degrees)
+
+    # Standard 3D Rotation Matrix around X-axis (counter-clockwise)
+    # We want to rotate the 'world' UP, so we use negative theta effectively
+    # OpenCV Coords: Y is DOWN, Z is FORWARD
+
+    # Formula for rotating coordinate system tilted down by theta:
+    # y_new = y * cos(theta) - z * sin(theta)
+    # z_new = y * sin(theta) + z * cos(theta)
+
+    # Note: Because OpenCV Y is "Down", we might need to invert logic depending on
+    # exactly how you want "World Y" (Height) to behave.
+    # Assuming we want Y to be UP (like Unity) and Z to be Forward (Parallel to ground)
+
+    # 1. First, let's stick to OpenCV format (Y down) but rotated
+    y_new = y * math.cos(theta) - z * math.sin(theta)
+    z_new = y * math.sin(theta) + z * math.cos(theta)
+
+    return x, y_new, z_new
+
+
 def load_calibration_data(filename, target_width, target_height):
-    """
-    Loads calibration data and SCALES it to match the target resolution.
-    """
     if not os.path.exists(filename):
         print(f"Error: Calibration file not found at {filename}")
         return None
-
     print(f"Loading calibration data from {filename}...")
     fs = cv2.FileStorage(filename, cv2.FILE_STORAGE_READ)
-
-    # Load raw data
     calib_data = {}
     keys = ['cameraMatrix1', 'distCoeffs1', 'cameraMatrix2', 'distCoeffs2',
             'R', 'T', 'R1', 'R2', 'P1', 'P2', 'Q', 'frame_width', 'frame_height']
     for key in keys:
         node = fs.getNode(key)
-        if node.isNone():
-            continue
+        if node.isNone(): continue
         calib_data[key] = node.mat() if key not in ['frame_width', 'frame_height'] else int(node.real())
-
     fs.release()
 
-    # --- SCALING LOGIC ---
     orig_w = calib_data['frame_width']
     orig_h = calib_data['frame_height']
-
     if orig_w != target_width or orig_h != target_height:
         print(f"⚠️ SCALING CALIBRATION: {orig_w}x{orig_h} -> {target_width}x{target_height}")
-
-        # Calculate scale factor (assuming aspect ratio is maintained)
         scale = target_width / orig_w
-
-        # Scale the Camera Matrices (Intrinsic)
         calib_data['cameraMatrix1'] *= scale
         calib_data['cameraMatrix2'] *= scale
-
-        # Restore the bottom-right element to 1.0 (Homogeneous coordinates requirement)
         calib_data['cameraMatrix1'][2, 2] = 1.0
         calib_data['cameraMatrix2'][2, 2] = 1.0
-
-        # Scale the Projection Matrices (P1, P2) from stereoRectify
-        # P matrices are 3x4. We scale the first 3 columns.
         calib_data['P1'] *= scale
         calib_data['P2'] *= scale
         calib_data['P1'][2, 2] = 1.0
         calib_data['P2'][2, 2] = 1.0
-
-        # NOTE: distCoeffs, R, and T do NOT need scaling.
-
-        # Update the width/height in the dict
         calib_data['frame_width'] = target_width
         calib_data['frame_height'] = target_height
-    else:
-        print("Resolution matches calibration. No scaling needed.")
-
     return calib_data
 
 
@@ -158,68 +157,45 @@ def find_target(frame):
 # ====================================================================
 
 def main():
-    # --- SETUP UDP ---
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"UDP Target set to: {UDP_IP}:{UDP_PORT}")
 
-    # --- 1. START THREADED STREAMS FIRST ---
-    # We must start them now to see what resolution the ESP32 is actually sending
     print("Starting Camera Threads...")
     cam_l = CameraStream(url_1, "Left")
     cam_r = CameraStream(url_2, "Right")
-
-    # Give threads a moment to connect and fill the buffer
     time.sleep(2.0)
 
-    # --- 2. GET ACTUAL RESOLUTION ---
     print("Checking stream resolution...")
     ret, temp_frame = cam_l.read()
-
-    # Retry loop in case cameras are slow to start
     tries = 0
     while not ret and tries < 10:
-        print(f"Waiting for frame... ({tries}/10)")
         time.sleep(0.5)
         ret, temp_frame = cam_l.read()
         tries += 1
 
     if not ret:
-        print("Error: Could not read frame from Left camera to determine resolution.")
-        cam_l.stop()
-        cam_r.stop()
+        print("Error: Could not read frame.")
         return
 
     stream_h, stream_w = temp_frame.shape[:2]
     print(f"Detected Stream Resolution: {stream_w}x{stream_h}")
 
-    # --- 3. LOAD & SCALE CALIBRATION ---
-    # Pass the detected width/height to the loader so it scales the math
     calib_data = load_calibration_data(CALIB_FILE, stream_w, stream_h)
+    if calib_data is None: return
 
-    if calib_data is None:
-        cam_l.stop()
-        cam_r.stop()
-        return
-
-    # Extract matrices
     mtx_l, dist_l = calib_data['cameraMatrix1'], calib_data['distCoeffs1']
     mtx_r, dist_r = calib_data['cameraMatrix2'], calib_data['distCoeffs2']
     R1, R2, P1, P2 = calib_data['R1'], calib_data['R2'], calib_data['P1'], calib_data['P2']
-
-    # Use the detected shape for mapping
     frame_shape = (stream_w, stream_h)
 
-    # --- 4. RECTIFICATION MAPS ---
     print("Generating rectification maps...")
     map_l_x, map_l_y = cv2.initUndistortRectifyMap(mtx_l, dist_l, R1, P1, frame_shape, cv2.CV_32FC1)
     map_r_x, map_r_y = cv2.initUndistortRectifyMap(mtx_r, dist_r, R2, P2, frame_shape, cv2.CV_32FC1)
 
     print("\nTracking started. Press 'q' to quit.")
 
-    # --- 5. MAIN LOOP ---
     while True:
         try:
-            # 1. Get latest frames from threads
             ret_l, frame_l = cam_l.read()
             ret_r, frame_r = cam_r.read()
 
@@ -227,39 +203,38 @@ def main():
                 time.sleep(0.01)
                 continue
 
-            # 2. Rectify
             rect_l = cv2.remap(frame_l, map_l_x, map_l_y, cv2.INTER_LINEAR)
             rect_r = cv2.remap(frame_r, map_r_x, map_r_y, cv2.INTER_LINEAR)
 
-            # 3. Find Targets
             target_l_data, mask_l = find_target(rect_l)
             target_r_data, mask_r = find_target(rect_r)
 
-            # 4. Triangulate & Send
             if target_l_data and target_r_data:
                 p1 = (target_l_data[0], target_l_data[1])
                 p2 = (target_r_data[0], target_r_data[1])
 
-                # Debug Circles
                 cv2.circle(rect_l, p1, int(target_l_data[2]), (0, 255, 0), 2)
                 cv2.circle(rect_r, p2, int(target_r_data[2]), (0, 255, 0), 2)
 
-                # Math
                 p1_np = np.array([[p1[0]], [p1[1]]], dtype=np.float64)
                 p2_np = np.array([[p2[0]], [p2[1]]], dtype=np.float64)
                 point_4d_hom = cv2.triangulatePoints(P1, P2, p1_np, p2_np)
                 point_3d = point_4d_hom / point_4d_hom[3]
 
-                x, y, z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
+                raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
 
-                # Send UDP
-                message = f"{x},{y},{z}"
+                # --- APPLY TILT CORRECTION HERE ---
+                final_x, final_y, final_z = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
+
+                message = f"{final_x},{final_y},{final_z}"
                 sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
 
-                # Print (Optional, comment out for speed)
-                print(f"Sent: X:{x:.2f} Y:{y:.2f} Z:{z:.2f}")
+                # Debug Print: Compare Raw vs Corrected
+                print(f"Raw X: {raw_x:.2f} | Corrected X: {final_x:.2f}")
+                print(f"Raw Y: {raw_y:.2f} | Corrected Y: {final_y:.2f}")
+                print(f"Raw Z: {raw_z:.2f} | Corrected Z: {final_z:.2f}")
+                print("-----------------------------------------------")
 
-            # 5. Display
             cv2.imshow('Rectified Left', rect_l)
             cv2.imshow('Rectified Right', rect_r)
 
@@ -270,7 +245,6 @@ def main():
             print(f"Main loop error: {e}")
             time.sleep(0.1)
 
-    # Cleanup
     cam_l.stop()
     cam_r.stop()
     cv2.destroyAllWindows()

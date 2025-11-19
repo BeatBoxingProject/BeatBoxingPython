@@ -8,8 +8,8 @@ import os
 # ====================================================================
 
 # Use Framesize 13 (UXGA - 1600x1200) for maximum precision
-url_1 = "http://192.168.137.102/stream?framesize=13"
-url_2 = "http://192.168.137.101/stream?framesize=13"
+url_1 = "http://192.168.137.101/stream?framesize=13"
+url_2 = "http://192.168.137.102/stream?framesize=13"
 
 # Check your board! You had (8, 5) in previous attempts.
 # Ensure this matches the INNER corners.
