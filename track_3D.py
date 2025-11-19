@@ -22,12 +22,17 @@ hsv_upper = np.array([79, 255, 255])
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 
-# --- NEW: TILT CORRECTION ---
-# Estimate how many degrees the cameras are angled DOWN from the horizon.
-# 0 = Looking straight forward (Horizontal)
-# 90 = Looking straight down (Vertical)
-# 45 = Typical ceiling mount angle
-CAMERA_TILT_ANGLE = 50  # <--- ADJUST THIS VALUE
+# Tilt Correction
+CAMERA_TILT_ANGLE = 50
+
+# --- VISUALIZER SETTINGS ---
+# Set the physical range (in meters) of your play area to scale the bars
+# X = Left/Right, Y = Height (Up/Down), Z = Depth (Forward/Back)
+RANGES = {
+    'x_min': 0.15, 'x_max': 0.7,
+    'y_min': -0.5, 'y_max': -0.15,
+    'z_min': 0.6, 'z_max': 1
+}
 
 
 # ====================================================================
@@ -78,29 +83,9 @@ class CameraStream:
 # ====================================================================
 
 def apply_tilt_correction(x, y, z, angle_degrees):
-    """
-    Rotates the 3D point around the X-axis to compensate for camera tilt.
-    Converts 'Camera Space' to 'World Space'.
-    """
-    # Convert to radians
     theta = math.radians(angle_degrees)
-
-    # Standard 3D Rotation Matrix around X-axis (counter-clockwise)
-    # We want to rotate the 'world' UP, so we use negative theta effectively
-    # OpenCV Coords: Y is DOWN, Z is FORWARD
-
-    # Formula for rotating coordinate system tilted down by theta:
-    # y_new = y * cos(theta) - z * sin(theta)
-    # z_new = y * sin(theta) + z * cos(theta)
-
-    # Note: Because OpenCV Y is "Down", we might need to invert logic depending on
-    # exactly how you want "World Y" (Height) to behave.
-    # Assuming we want Y to be UP (like Unity) and Z to be Forward (Parallel to ground)
-
-    # 1. First, let's stick to OpenCV format (Y down) but rotated
     y_new = y * math.cos(theta) - z * math.sin(theta)
     z_new = y * math.sin(theta) + z * math.cos(theta)
-
     return x, y_new, z_new
 
 
@@ -108,7 +93,6 @@ def load_calibration_data(filename, target_width, target_height):
     if not os.path.exists(filename):
         print(f"Error: Calibration file not found at {filename}")
         return None
-    print(f"Loading calibration data from {filename}...")
     fs = cv2.FileStorage(filename, cv2.FILE_STORAGE_READ)
     calib_data = {}
     keys = ['cameraMatrix1', 'distCoeffs1', 'cameraMatrix2', 'distCoeffs2',
@@ -152,6 +136,59 @@ def find_target(frame):
     return found_target, mask
 
 
+# --- VISUALIZER FUNCTION ---
+def draw_visualizer(x, y, z):
+    """Draws a window with 3 bars representing X, Y, Z values."""
+    width, height = 400, 300
+    vis_img = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Bar Configuration
+    bar_w = 80
+    spacing = 40
+    start_x = 40
+    max_bar_h = 200
+    base_y = 250
+
+    # Define the 3 bars
+    bars = [
+        {'label': 'X', 'val': x, 'min': RANGES['x_min'], 'max': RANGES['x_max'], 'color': (0, 0, 255)},  # Red
+        {'label': 'Y', 'val': y, 'min': RANGES['y_min'], 'max': RANGES['y_max'], 'color': (0, 255, 0)},  # Green
+        {'label': 'Z', 'val': z, 'min': RANGES['z_min'], 'max': RANGES['z_max'], 'color': (255, 0, 0)}  # Blue
+    ]
+
+    for i, b in enumerate(bars):
+        # Calculate Normalized Height (0.0 to 1.0)
+        denom = b['max'] - b['min']
+        if denom == 0: denom = 1  # Prevent div by zero
+
+        norm_val = (b['val'] - b['min']) / denom
+        norm_val = np.clip(norm_val, 0.0, 1.0)
+
+        bar_h = int(norm_val * max_bar_h)
+
+        # Calculate positions
+        bx = start_x + i * (bar_w + spacing)
+        by_top = base_y - bar_h
+
+        # Draw Background (Gray track)
+        cv2.rectangle(vis_img, (bx, base_y - max_bar_h), (bx + bar_w, base_y), (50, 50, 50), -1)
+
+        # Draw Filled Bar
+        cv2.rectangle(vis_img, (bx, by_top), (bx + bar_w, base_y), b['color'], -1)
+
+        # Draw Border
+        cv2.rectangle(vis_img, (bx, base_y - max_bar_h), (bx + bar_w, base_y), (255, 255, 255), 2)
+
+        # Draw Label (X, Y, Z)
+        cv2.putText(vis_img, b['label'], (bx + 30, base_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+        # Draw Value Text inside bar
+        val_text = f"{b['val']:.2f}"
+        cv2.putText(vis_img, val_text, (bx + 10, base_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    return vis_img
+
+
 # ====================================================================
 # --- 4. MAIN APPLICATION ---
 # ====================================================================
@@ -167,15 +204,9 @@ def main():
 
     print("Checking stream resolution...")
     ret, temp_frame = cam_l.read()
-    tries = 0
-    while not ret and tries < 10:
+    while not ret:
         time.sleep(0.5)
         ret, temp_frame = cam_l.read()
-        tries += 1
-
-    if not ret:
-        print("Error: Could not read frame.")
-        return
 
     stream_h, stream_w = temp_frame.shape[:2]
     print(f"Detected Stream Resolution: {stream_w}x{stream_h}")
@@ -193,6 +224,9 @@ def main():
     map_r_x, map_r_y = cv2.initUndistortRectifyMap(mtx_r, dist_r, R2, P2, frame_shape, cv2.CV_32FC1)
 
     print("\nTracking started. Press 'q' to quit.")
+
+    # --- Initialize variables OUTSIDE loop to persist values ---
+    final_x, final_y, final_z = 0, 0, 0
 
     while True:
         try:
@@ -223,17 +257,18 @@ def main():
 
                 raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
 
-                # --- APPLY TILT CORRECTION HERE ---
+                # Tilt Correction
                 final_x, final_y, final_z = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
 
+                # Send UDP
                 message = f"{final_x},{final_y},{final_z}"
                 sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
 
-                # Debug Print: Compare Raw vs Corrected
-                print(f"Raw X: {raw_x:.2f} | Corrected X: {final_x:.2f}")
-                print(f"Raw Y: {raw_y:.2f} | Corrected Y: {final_y:.2f}")
-                print(f"Raw Z: {raw_z:.2f} | Corrected Z: {final_z:.2f}")
-                print("-----------------------------------------------")
+            # --- UPDATE VISUALIZER WINDOW ---
+            # Uses final_x/y/z which retains value if tracking fails
+            vis_frame = draw_visualizer(final_x, final_y, final_z)
+            cv2.imshow('3D Data Visualizer', vis_frame)
+            # --------------------------------
 
             cv2.imshow('Rectified Left', rect_l)
             cv2.imshow('Rectified Right', rect_r)
