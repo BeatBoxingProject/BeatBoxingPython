@@ -5,7 +5,7 @@ import time
 # ==========================================
 # CONFIG
 # ==========================================
-URL = "http://192.168.137.102/stream"
+URL = "http://192.168.137.101/stream"
 # ==========================================
 
 # Global variables to store the latest frame and current HSV range
