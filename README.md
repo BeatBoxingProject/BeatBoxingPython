@@ -22,19 +22,20 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 
    * **Alignment:** Cameras should be roughly parallel.
 
-3. **Controller:** A colored boxing glove (System is currently tuned for **Pink/Magenta**).
+3. **Controller:** A colored boxing glove.
 
 4. **Network:** A dedicated 2.4GHz WiFi hotspot is recommended for low latency.
 
 ## 📂 Project Structure
 
-| **Location** | **Description** | 
-| `main.py` | **The Main Engine.** Run this to start the tracking system. | 
-| `core/` | **Library Logic.** Contains the camera threads (`camera.py`), math (`vision.py`), and settings (`config.py`). | 
-| `tools/align_cameras.py` | **Step 1:** Visual aid to physically aim the cameras so they overlap correctly. | 
-| `tools/calibrate.py` | **Step 2:** Uses a checkerboard to calculate lens distortion and stereo geometry. | 
-| `tools/color_tuner.py` | **Step 3:** A tool with sliders to find the perfect HSV color values for your glove. | 
-| `data/stereo_calib.yml` | **Generated File.** Stores the intrinsic and extrinsic camera matrices (created by Step 2). | 
+| Location | Description |
+| :---- | :---- |
+| main.py | **The Main Engine.** Run this to start the tracking system. |
+| core/ | **Library Logic.** Contains the camera threads (camera.py), math (vision.py), and settings (config.py). |
+| tools/align\_cameras.py | **Step 1:** Visual aid to physically aim the cameras so they overlap correctly. |
+| tools/calibrate.py | **Step 2:** Uses a checkerboard to calculate lens distortion and stereo geometry. |
+| tools/color\_tuner.py | **Step 3:** A tool with sliders to find the perfect HSV color values for your glove. |
+| data/stereo\_calib.yml | **Generated File.** Stores the intrinsic and extrinsic camera matrices (created by Step 2). |
 
 ## ⚙️ Installation & Requirements
 
