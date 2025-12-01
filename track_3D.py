@@ -5,6 +5,7 @@ import os
 import socket
 from threading import Thread
 import math
+from collections import deque
 
 # ====================================================================
 # --- 1. CONFIGURATION ---
@@ -25,8 +26,11 @@ UDP_PORT = 5005
 # Tilt Correction
 CAMERA_TILT_ANGLE = 50
 
-# --- VISUALIZER SETTINGS ---
-# Set the physical range (in meters) of your play area to scale the bars
+# Smoothing Settings
+# Higher = Smoother but more lag. Lower = Jittery but faster.
+SMOOTHING_BUFFER_SIZE = 5
+
+# Visualizer Ranges
 RANGES = {
     'x_min': 0.15, 'x_max': 0.7,
     'y_min': 0.6, 'y_max': 1.0,
@@ -35,7 +39,7 @@ RANGES = {
 
 
 # ====================================================================
-# --- 2. THE NEW THREADED CAMERA CLASS ---
+# --- 2. HELPERS & CLASSES ---
 # ====================================================================
 
 class CameraStream:
@@ -77,9 +81,26 @@ class CameraStream:
         self.t.join()
 
 
-# ====================================================================
-# --- 3. HELPER FUNCTIONS ---
-# ====================================================================
+# --- NEW SMOOTHER CLASS ---
+class CoordinateSmoother:
+    def __init__(self, buffer_size=5):
+        self.buffer_size = buffer_size
+        self.x_buffer = deque(maxlen=buffer_size)
+        self.y_buffer = deque(maxlen=buffer_size)
+        self.z_buffer = deque(maxlen=buffer_size)
+
+    def update(self, x, y, z):
+        self.x_buffer.append(x)
+        self.y_buffer.append(y)
+        self.z_buffer.append(z)
+
+        # Calculate Average
+        avg_x = sum(self.x_buffer) / len(self.x_buffer)
+        avg_y = sum(self.y_buffer) / len(self.y_buffer)
+        avg_z = sum(self.z_buffer) / len(self.z_buffer)
+
+        return avg_x, avg_y, avg_z
+
 
 def apply_tilt_correction(x, y, z, angle_degrees):
     theta = math.radians(angle_degrees)
@@ -135,61 +156,41 @@ def find_target(frame):
     return found_target, mask
 
 
-# --- VISUALIZER FUNCTION ---
 def draw_visualizer(x, y, z):
-    """Draws a window with 3 bars representing X, Y, Z values."""
     width, height = 400, 300
     vis_img = np.zeros((height, width, 3), dtype=np.uint8)
 
-    # Bar Configuration
-    bar_w = 80
-    spacing = 40
-    start_x = 40
-    max_bar_h = 200
-    base_y = 250
+    bar_w, spacing, start_x = 80, 40, 40
+    max_bar_h, base_y = 200, 250
 
-    # Define the 3 bars
     bars = [
-        {'label': 'X', 'val': x, 'min': RANGES['x_min'], 'max': RANGES['x_max'], 'color': (0, 0, 255)},  # Red
-        {'label': 'Y', 'val': y, 'min': RANGES['y_min'], 'max': RANGES['y_max'], 'color': (0, 255, 0)},  # Green
-        {'label': 'Z', 'val': z, 'min': RANGES['z_min'], 'max': RANGES['z_max'], 'color': (255, 0, 0)}  # Blue
+        {'label': 'X', 'val': x, 'min': RANGES['x_min'], 'max': RANGES['x_max'], 'color': (0, 0, 255)},
+        {'label': 'Y', 'val': y, 'min': RANGES['y_min'], 'max': RANGES['y_max'], 'color': (0, 255, 0)},
+        {'label': 'Z', 'val': z, 'min': RANGES['z_min'], 'max': RANGES['z_max'], 'color': (255, 0, 0)}
     ]
 
     for i, b in enumerate(bars):
-        # Calculate Normalized Height (0.0 to 1.0)
         denom = b['max'] - b['min']
-        if denom == 0: denom = 1  # Prevent div by zero
-
+        if denom == 0: denom = 1
         norm_val = (b['val'] - b['min']) / denom
         norm_val = np.clip(norm_val, 0.0, 1.0)
-
         bar_h = int(norm_val * max_bar_h)
 
-        # Calculate positions
         bx = start_x + i * (bar_w + spacing)
         by_top = base_y - bar_h
 
-        # Draw Background (Gray track)
         cv2.rectangle(vis_img, (bx, base_y - max_bar_h), (bx + bar_w, base_y), (50, 50, 50), -1)
-
-        # Draw Filled Bar
         cv2.rectangle(vis_img, (bx, by_top), (bx + bar_w, base_y), b['color'], -1)
-
-        # Draw Border
         cv2.rectangle(vis_img, (bx, base_y - max_bar_h), (bx + bar_w, base_y), (255, 255, 255), 2)
-
-        # Draw Label (X, Y, Z)
         cv2.putText(vis_img, b['label'], (bx + 30, base_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-        # Draw Value Text inside bar
-        val_text = f"{b['val']:.2f}"
-        cv2.putText(vis_img, val_text, (bx + 10, base_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(vis_img, f"{b['val']:.2f}", (bx + 10, base_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255),
+                    1)
 
     return vis_img
 
 
 # ====================================================================
-# --- 4. MAIN APPLICATION ---
+# --- 3. MAIN APPLICATION ---
 # ====================================================================
 
 def main():
@@ -224,7 +225,10 @@ def main():
 
     print("\nTracking started. Press 'q' to quit.")
 
-    # --- Initialize variables OUTSIDE loop to persist values ---
+    # --- Initialize Smoother ---
+    smoother = CoordinateSmoother(buffer_size=SMOOTHING_BUFFER_SIZE)
+
+    # Initialize vars for visualizer persistence
     final_x, final_y, final_z = 0, 0, 0
 
     while True:
@@ -256,23 +260,24 @@ def main():
 
                 raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
 
-                # 1. Apply Tilt Correction
+                # 1. Tilt Correction
                 corrected_x, corrected_y, corrected_z = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
 
-                # 2. SWAP AXES (Y <-> Z)
-                final_x = corrected_x
-                final_y = corrected_z  # Y is now the depth/distance
-                final_z = corrected_y  # Z is now the vertical/forward offset
+                # 2. Swap Axes
+                swapped_x = corrected_x
+                swapped_y = corrected_z
+                swapped_z = corrected_y
+
+                # 3. SMOOTHING (The Fix for Shaky Y)
+                final_x, final_y, final_z = smoother.update(swapped_x, swapped_y, swapped_z)
 
                 # Send UDP
                 message = f"{final_x},{final_y},{final_z}"
                 sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
 
-            # --- UPDATE VISUALIZER WINDOW ---
-            # Uses final_x/y/z which retains value if tracking fails
+            # Visualizer
             vis_frame = draw_visualizer(final_x, final_y, final_z)
             cv2.imshow('3D Data Visualizer', vis_frame)
-            # --------------------------------
 
             cv2.imshow('Rectified Left', rect_l)
             cv2.imshow('Rectified Right', rect_r)
