@@ -27,11 +27,10 @@ CAMERA_TILT_ANGLE = 50
 
 # --- VISUALIZER SETTINGS ---
 # Set the physical range (in meters) of your play area to scale the bars
-# X = Left/Right, Y = Height (Up/Down), Z = Depth (Forward/Back)
 RANGES = {
     'x_min': 0.15, 'x_max': 0.7,
-    'y_min': -0.5, 'y_max': -0.15,
-    'z_min': 0.6, 'z_max': 1
+    'y_min': 0.6, 'y_max': 1.0,
+    'z_min': -0.5, 'z_max': -0.15
 }
 
 
@@ -257,8 +256,13 @@ def main():
 
                 raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
 
-                # Tilt Correction
-                final_x, final_y, final_z = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
+                # 1. Apply Tilt Correction
+                corrected_x, corrected_y, corrected_z = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
+
+                # 2. SWAP AXES (Y <-> Z)
+                final_x = corrected_x
+                final_y = corrected_z  # Y is now the depth/distance
+                final_z = corrected_y  # Z is now the vertical/forward offset
 
                 # Send UDP
                 message = f"{final_x},{final_y},{final_z}"
