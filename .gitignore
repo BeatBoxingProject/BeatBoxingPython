@@ -1,0 +1,29 @@
+# 1. Python Internals
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 2. Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# 4. Distribution / Build Artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 5. Testing & Type Checking
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 6. Security & Environment Variables
+.env
+.env.local
+
+# 7. IDEs & OS Files
+.idea/
