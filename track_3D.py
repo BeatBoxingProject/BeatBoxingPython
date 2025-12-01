@@ -15,8 +15,8 @@ url_2 = "http://192.168.137.102/stream?framesize=8"  # Right Camera
 CALIB_FILE = "stereo_calib.yml"
 
 # Target Color
-hsv_lower = np.array([26, 41, 168])
-hsv_upper = np.array([79, 255, 255])
+hsv_lower = np.array([35, 42, 119])
+hsv_upper = np.array([66, 255, 255])
 
 # UDP Settings
 UDP_IP = "127.0.0.1"
