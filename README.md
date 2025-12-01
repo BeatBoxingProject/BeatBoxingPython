@@ -1,7 +1,3 @@
-# Beat Boxing - Stereoscopic 3D Tracking System 🥊
-
-**Beat Boxing** is a computer vision-based tracking system designed to bring real-world boxing into a virtual environment (Unity). Unlike standard VR controllers, this system tracks a real boxing glove using a custom "Top-Down Stereo" camera rig, allowing players to hit a physical punching bag while interacting with a "Beat Saber-style" rhythm game.
-
 ## 🚀 Project Overview
 
 The system captures video from two **ESP32-CAM** modules, processes the data using Python (OpenCV), calculates the 3D coordinates ($X, Y, Z$) of the glove, and streams this data to Unity via UDP in real-time.
