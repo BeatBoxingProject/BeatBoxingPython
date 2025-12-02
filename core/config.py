@@ -31,7 +31,7 @@ HSV_LOWER = np.array([35, 42, 119])
 HSV_UPPER = np.array([66, 255, 255])
 
 # Geometry
-CAMERA_TILT_ANGLE = 50
+CAMERA_TILT_ANGLE = 40
 
 # Smoothing
 SMOOTHING_BUFFER_SIZE = 5
