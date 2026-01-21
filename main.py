@@ -110,9 +110,7 @@ def main():
             print(msg)
 
             # --- VISUALIZE ---
-            # Visualizer currently only supports one point, so we just show Left hand for now
-            # You can update visualizer later to accept two tuples
-            vis_frame = draw_visualizer(pos_L[0], pos_L[1], pos_L[2])
+            vis_frame = draw_visualizer(pos_L, pos_R)
 
             cv2.imshow('3D Data', vis_frame)
             cv2.imshow('Left Eye', rect_l)
