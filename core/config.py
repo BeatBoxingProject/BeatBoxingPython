@@ -26,9 +26,13 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 # 2. Define the File Path
 CALIB_FILE = os.path.join(DATA_DIR, "stereo_calib.yml")
 
-# Target Color (Pink/Magenta)
-HSV_LOWER = np.array([35, 42, 119])
-HSV_UPPER = np.array([66, 255, 255])
+# Target Color Left
+HSV_LEFT_LOWER = np.array([35, 42, 119])
+HSV_LEFT_UPPER = np.array([66, 255, 255])
+
+# Target Color Right
+HSV_RIGHT_LOWER = np.array([31, 116, 88])
+HSV_RIGHT_UPPER = np.array([179, 255, 255])
 
 # Geometry
 CAMERA_TILT_ANGLE = 40
