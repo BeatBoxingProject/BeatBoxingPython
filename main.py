@@ -1,132 +1,76 @@
 import cv2
 import time
 import socket
+import numpy as np
 from core.config import *
 from core.camera import CameraStream
-from core.vision import CoordinateSmoother, find_target, apply_tilt_correction, load_calibration_data
+from core.vision import StereoCamera, CoordinateSmoother
 from core.visualizer import draw_visualizer
 
-
-def process_hand(rect_l, rect_r, hsv_lower, hsv_upper, P1, P2, smoother, tilt_angle):
-    """
-    Helper function to find ONE hand, triangulate it, and smooth it.
-    Returns (x, y, z) or None if not found.
-    """
-    # 1. Find targets in both eyes
-    target_l, _ = find_target(rect_l, hsv_lower, hsv_upper)
-    target_r, _ = find_target(rect_r, hsv_lower, hsv_upper)
-
-    if target_l and target_r:
-        # 2. Draw debug circles (Visual feedback)
-        cv2.circle(rect_l, (target_l[0], target_l[1]), int(target_l[2]), (0, 255, 255), 2)
-        cv2.circle(rect_r, (target_r[0], target_r[1]), int(target_r[2]), (0, 255, 255), 2)
-
-        # 3. Triangulate
-        p1_np = np.array([[target_l[0]], [target_l[1]]], dtype=np.float64)
-        p2_np = np.array([[target_r[0]], [target_r[1]]], dtype=np.float64)
-        point_4d_hom = cv2.triangulatePoints(P1, P2, p1_np, p2_np)
-        point_3d = point_4d_hom / point_4d_hom[3]
-
-        raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
-
-        # 4. Transform (Tilt + Swap Axes)
-        cx, cy, cz = apply_tilt_correction(raw_x, raw_y, raw_z, tilt_angle)
-
-        # Mapping: Py X->Unity X, Py Z->Unity Y, Py Y->Unity Z
-        swapped_x, swapped_y, swapped_z = cx, cz, cy
-
-        # 5. Smooth
-        return smoother.update(swapped_x, swapped_y, swapped_z)
-
-    return None
-
-
 def main():
-    # 1. Setup Network
+    # 1. Init Network
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print(f"UDP Target set to: {UDP_IP}:{UDP_PORT}")
-
-    # 2. Start Cameras
-    print("Starting Camera Threads...")
+    
+    # 2. Init Cameras
+    print("Starting Cameras...")
     cam_l = CameraStream(LEFT_CAM_URL_TRACKING, "Left")
     cam_r = CameraStream(RIGHT_CAM_URL_TRACKING, "Right")
-    time.sleep(2.0)
+    
+    # Wait for first frame to get resolution
+    while not cam_l.ret: time.sleep(0.1)
+    h, w = cam_l.frame.shape[:2]
 
-    # 3. Load Calibration
-    print("Checking resolution...")
-    ret, temp_frame = cam_l.read()
-    while not ret:
-        time.sleep(0.5)
-        ret, temp_frame = cam_l.read()
+    # 3. Init Stereo Logic
+    print(f"Loading Calibration ({w}x{h})...")
+    stereo = StereoCamera(CALIB_FILE, w, h, CAMERA_TILT_ANGLE)
+    
+    smooth_l = CoordinateSmoother(SMOOTHING_BUFFER_SIZE)
+    smooth_r = CoordinateSmoother(SMOOTHING_BUFFER_SIZE)
 
-    h, w = temp_frame.shape[:2]
-    calib_data = load_calibration_data(CALIB_FILE, w, h)
-    if calib_data is None: return
+    # Last known valid positions (for UDP persistence)
+    udp_pos_L = (0, 0, 0)
+    udp_pos_R = (0, 0, 0)
 
-    mtx_l, dist_l = calib_data['cameraMatrix1'], calib_data['distCoeffs1']
-    mtx_r, dist_r = calib_data['cameraMatrix2'], calib_data['distCoeffs2']
-    R1, R2, P1, P2 = calib_data['R1'], calib_data['R2'], calib_data['P1'], calib_data['P2']
-
-    map_l_x, map_l_y = cv2.initUndistortRectifyMap(mtx_l, dist_l, R1, P1, (w, h), cv2.CV_32FC1)
-    map_r_x, map_r_y = cv2.initUndistortRectifyMap(mtx_r, dist_r, R2, P2, (w, h), cv2.CV_32FC1)
-
-    # 4. Initialize Smoothers (ONE PER HAND)
-    smoother_left = CoordinateSmoother(buffer_size=SMOOTHING_BUFFER_SIZE)
-    smoother_right = CoordinateSmoother(buffer_size=SMOOTHING_BUFFER_SIZE)
-
-    # Persist last known positions so hands don't snap to 0 when tracking is lost
-    pos_L = (0, 0, 0)
-    pos_R = (0, 0, 0)
-
-    print("\nTracking started. Press 'q' to quit.")
+    print("\n🚀 Tracking System Active. Press 'q' to quit.")
 
     while True:
-        try:
-            ret_l, frame_l = cam_l.read()
-            ret_r, frame_r = cam_r.read()
+        if not cam_l.ret or not cam_r.ret: continue
+        
+        # A. Get & Rectify Frames
+        raw_l, raw_r = cam_l.frame, cam_r.frame
+        rect_l, rect_r = stereo.rectify_frames(raw_l, raw_r)
 
-            if not ret_l or not ret_r:
-                time.sleep(0.01)
-                continue
+        # B. Process Hands
+        # Returns (x,y,z) or None
+        curr_L = stereo.get_position(rect_l, rect_r, HSV_LEFT_LOWER, HSV_LEFT_UPPER)
+        curr_R = stereo.get_position(rect_l, rect_r, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER)
 
-            # Rectify
-            rect_l = cv2.remap(frame_l, map_l_x, map_l_y, cv2.INTER_LINEAR)
-            rect_r = cv2.remap(frame_r, map_r_x, map_r_y, cv2.INTER_LINEAR)
+        # C. Smooth & Persist Data
+        if curr_L: udp_pos_L = smooth_l.update(*curr_L)
+        if curr_R: udp_pos_R = smooth_r.update(*curr_R)
 
-            # --- PROCESS LEFT HAND ---
-            new_L = process_hand(rect_l, rect_r, HSV_LEFT_LOWER, HSV_LEFT_UPPER, P1, P2, smoother_left,
-                                 CAMERA_TILT_ANGLE)
-            if new_L: pos_L = new_L
+        # D. Send UDP (Always send last known valid data to Unity)
+        msg = f"{udp_pos_L[0]:.2f},{udp_pos_L[1]:.2f},{udp_pos_L[2]:.2f}|" \
+              f"{udp_pos_R[0]:.2f},{udp_pos_R[1]:.2f},{udp_pos_R[2]:.2f}"
+        sock.sendto(msg.encode(), (UDP_IP, UDP_PORT))
 
-            # --- PROCESS RIGHT HAND ---
-            new_R = process_hand(rect_l, rect_r, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER, P1, P2, smoother_right,
-                                 CAMERA_TILT_ANGLE)
-            if new_R: pos_R = new_R
+        # E. Visualization
+        # Pass 'curr_L' (which might be None) to show "Searching..." if lost
+        vis_frame = draw_visualizer(curr_L if curr_L else None, 
+                                    curr_R if curr_R else None)
+        
+        # Combine camera views into one window for performance
+        debug_view = np.hstack((rect_l, rect_r))
+        debug_view = cv2.resize(debug_view, (800, 300)) # Resize for screen fit
 
-            # --- SEND DATA ---
-            # Format: "Lx,Ly,Lz|Rx,Ry,Rz"
-            msg = f"{pos_L[0]:.2f},{pos_L[1]:.2f},{pos_L[2]:.2f}|{pos_R[0]:.2f},{pos_R[1]:.2f},{pos_R[2]:.2f}"
-            sock.sendto(msg.encode(), (UDP_IP, UDP_PORT))
-            print(msg)
+        cv2.imshow("Stereo Tracking Debug", debug_view)
+        cv2.imshow("3D Data", vis_frame)
 
-            # --- VISUALIZE ---
-            vis_frame = draw_visualizer(pos_L, pos_R)
-
-            cv2.imshow('3D Data', vis_frame)
-            cv2.imshow('Left Eye', rect_l)
-            cv2.imshow('Right Eye', rect_r)
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(0.1)
+        if cv2.waitKey(1) & 0xFF == ord('q'): break
 
     cam_l.stop()
     cam_r.stop()
     cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
