@@ -205,8 +205,9 @@ def main():
                         objpoints, imgpoints_r, frame_shape, None, None)
 
                     print("3. performing Stereo Calibration...")
-                    flags = cv2.CALIB_FIX_INTRINSIC
-                    (_, _, _, _, _, R, T, E, F) = cv2.stereoCalibrate(
+                    # CHANGE: Allow the optimizer to adjust intrinsics for a better stereo fit
+                    flags = cv2.CALIB_USE_INTRINSIC_GUESS
+                    (ret_s, mtx_l, dist_l, mtx_r, dist_r, R, T, E, F) = cv2.stereoCalibrate(
                         objpoints, imgpoints_l, imgpoints_r,
                         mtx_l, dist_l, mtx_r, dist_r,
                         frame_shape, flags=flags, criteria=CRITERIA
