@@ -158,11 +158,14 @@ def main():
                         print(f"✅ Calibration looks good! (RMS: {ret_s:.4f})")
 
                     # Rectification
+                    # alpha=-1 (Auto): Tries to find a "nice" balance. If your distortion coefficients are high (common with cheap lenses), it might mistakenly decide that the "nice" area is a tiny 10x10 pixel region in the center, stretching it to fill the whole screen.
+                    # alpha=0 (Crop): "Zoom in until the image fits." This is usually what you want for gaming, but if your alignment is bad, you might lose too much of the image.
+                    # alpha=1 (Full): "Zoom out so I see everything." This results in curved black borders around the image (like a fisheye effect), but it guarantees you will actually see the video feed.
                     print("Rectifying...")
                     R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(
                         mtx_l, dist_l, mtx_r, dist_r,
                         frame_shape, R, T,
-                        flags=cv2.CALIB_ZERO_DISPARITY, alpha=-1
+                        flags=cv2.CALIB_ZERO_DISPARITY, alpha=1
                     )
 
                     data = {
