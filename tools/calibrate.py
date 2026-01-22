@@ -132,19 +132,30 @@ def main():
                     print("Calibrating Left...")
                     ret_l, mtx_l, dist_l, rvecs_l, tvecs_l = cv2.calibrateCamera(
                         objpoints, imgpoints_l, frame_shape, None, None)
+                    print(f"  >> Left RMS: {ret_l:.4f}")
 
                     print("Calibrating Right...")
                     ret_r, mtx_r, dist_r, rvecs_r, tvecs_r = cv2.calibrateCamera(
                         objpoints, imgpoints_r, frame_shape, None, None)
+                    print(f"  >> Right RMS: {ret_r:.4f}")
 
                     # Stereo Calibration
                     print("Stereo Calibrating...")
-                    flags = cv2.CALIB_FIX_INTRINSIC
+                    # We LOCK the principal point and IGNORE tangential distortion to prevent "explosion"
+                    flags = cv2.CALIB_FIX_PRINCIPAL_POINT | cv2.CALIB_FIX_ASPECT_RATIO | cv2.CALIB_ZERO_TANGENT_DIST | cv2.CALIB_SAME_FOCAL_LENGTH
+
                     (ret_s, mtx_l, dist_l, mtx_r, dist_r, R, T, E, F) = cv2.stereoCalibrate(
                         objpoints, imgpoints_l, imgpoints_r,
                         mtx_l, dist_l, mtx_r, dist_r,
                         frame_shape, flags=flags, criteria=CRITERIA
                     )
+
+                    print(f"RMS Error: {ret_s}")
+                    if ret_s > 1.0:
+                        print("⚠️ WARNING: RMS Error is too high! (> 1.0). Results will be warped.")
+                        print("Try capturing more images or holding the board steadier.")
+                    else:
+                        print(f"✅ Calibration looks good! (RMS: {ret_s:.4f})")
 
                     # Rectification
                     print("Rectifying...")
