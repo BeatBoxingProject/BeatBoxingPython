@@ -19,17 +19,19 @@ IMAGE_FOLDER = os.path.join(DATA_DIR, "calibration_images")
 # --- CAMERA ORDER SETTING ---
 SWAP_CAMERAS = False
 
-# Use RATIONAL model to handle ESP32 lens distortion
-STEREO_FLAGS = (
-        cv2.CALIB_USE_INTRINSIC_GUESS |
-        cv2.CALIB_FIX_ASPECT_RATIO |
-        cv2.CALIB_ZERO_TANGENT_DIST |
-        cv2.CALIB_RATIONAL_MODEL |
-        cv2.CALIB_SAME_FOCAL_LENGTH
+INDIVIDUAL_FLAGS = (
+    cv2.CALIB_FIX_PRINCIPAL_POINT |
+    cv2.CALIB_FIX_ASPECT_RATIO |
+    cv2.CALIB_ZERO_TANGENT_DIST    # ESP32 sensors are flat, so this is usually 0
 )
 
-# Standard flags for individual cameras to match the complexity of stereo
-INDIVIDUAL_FLAGS = cv2.CALIB_RATIONAL_MODEL
+STEREO_FLAGS = (
+    cv2.CALIB_FIX_INTRINSIC |      # TRUST the individual calibration! Don't warp it further.
+    cv2.CALIB_FIX_PRINCIPAL_POINT |
+    cv2.CALIB_FIX_ASPECT_RATIO |
+    cv2.CALIB_ZERO_TANGENT_DIST |
+    cv2.CALIB_SAME_FOCAL_LENGTH
+)
 
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.0001)
 
@@ -216,7 +218,7 @@ def main():
     R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(
         mtx_l, dist_l, mtx_r, dist_r,
         frame_shape, R, T,
-        flags=cv2.CALIB_ZERO_DISPARITY, alpha=0
+        flags=cv2.CALIB_ZERO_DISPARITY, alpha=-1
     )
 
     data = {
