@@ -27,3 +27,11 @@ htmlcov/
 
 # 7. IDEs & OS Files
 .idea/
+
+# 8. Custom Data
+# Ignore data folders
+data/
+tools/calibration_images/
+
+# Keep the folder structure, but ignore the files
+!data/.gitkeep
