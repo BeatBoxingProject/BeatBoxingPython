@@ -5,8 +5,8 @@ import os
 # HARDWARE SETTINGS
 # ==========================================
 # IPs
-CAM_IP_1 = "192.168.137.101"
-CAM_IP_2 = "192.168.137.102"
+CAM_IP_1 = "192.168.137.102" # Left Camera when standing in front of the punching bag
+CAM_IP_2 = "192.168.137.101" # Right Camera when standing in front of the punching bag
 
 # Calibration Resolutions (UXGA - High Res)
 LEFT_CAM_URL_CALIB = f"http://{CAM_IP_1}/stream?framesize=13"
