@@ -12,28 +12,77 @@ from core.config import CALIB_FILE, DATA_DIR
 # ====================================================================
 # --- CONFIGURATION ---
 # ====================================================================
-CHECKERBOARD = (9, 6)  # Inner corners (rows, cols)
-SQUARE_SIZE_METERS = 0.025  # Size of one square in meters
+CHECKERBOARD = (9, 6)
+SQUARE_SIZE_METERS = 0.025
 IMAGE_FOLDER = os.path.join(DATA_DIR, "calibration_images")
 
 # --- CAMERA ORDER SETTING ---
-# Set to True if "left_xx.jpg" is actually the RIGHT camera view
 SWAP_CAMERAS = False
 
-# Flags for ESP32/Cheap Lenses
+# Use RATIONAL model to handle ESP32 lens distortion
 STEREO_FLAGS = (
-        cv2.CALIB_FIX_PRINCIPAL_POINT |
+        cv2.CALIB_USE_INTRINSIC_GUESS |
         cv2.CALIB_FIX_ASPECT_RATIO |
         cv2.CALIB_ZERO_TANGENT_DIST |
+        cv2.CALIB_RATIONAL_MODEL |
         cv2.CALIB_SAME_FOCAL_LENGTH
 )
+
+# Standard flags for individual cameras to match the complexity of stereo
+INDIVIDUAL_FLAGS = cv2.CALIB_RATIONAL_MODEL
 
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.0001)
 
 
 # ====================================================================
-# --- MAIN SCRIPT ---
+# --- HELPERS ---
 # ====================================================================
+
+def calculate_reprojection_errors(objpoints, imgpoints, rvecs, tvecs, mtx, dist, filenames):
+    """
+    Calculates the error for each specific image to find 'Bad Apples'.
+    """
+    total_error = 0
+    error_list = []
+
+    for i in range(len(objpoints)):
+        imgpoints2, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
+        error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2) / len(imgpoints2)
+        total_error += error
+
+        # Store error with filename for sorting
+        name = os.path.basename(filenames[i])
+        error_list.append((name, error))
+
+    return error_list
+
+
+def print_bad_apples(error_list, label):
+    """
+    Prints the list of images sorted by worst error.
+    """
+    # Sort by error (descending)
+    sorted_errors = sorted(error_list, key=lambda x: x[1], reverse=True)
+
+    print(f"\n--- {label} PER-IMAGE ERRORS (Worst to Best) ---")
+    print(f"{'Filename':<30} | {'Error':<10} |Status")
+    print("-" * 55)
+
+    bad_count = 0
+    for name, err in sorted_errors:
+        status = "✅ OK"
+        if err > 1.0:
+            status = "❌ BAD"
+            bad_count += 1
+        elif err > 0.5:
+            status = "⚠️ WEAK"
+
+        print(f"{name:<30} | {err:.4f}     | {status}")
+
+    if bad_count > 0:
+        print(f"\n💡 TIP: Delete the {bad_count} images marked '❌ BAD' and run this again.")
+    print("-" * 55)
+
 
 def save_calibration_data(filepath, matrices):
     directory = os.path.dirname(filepath)
@@ -48,16 +97,17 @@ def save_calibration_data(filepath, matrices):
     for key, value in matrices.items():
         fs.write(key, value)
     fs.release()
-    print(f"Successfully saved data.")
+    print("Successfully saved data.")
 
+
+# ====================================================================
+# --- MAIN ---
+# ====================================================================
 
 def main():
-    print(f"--- STEREO CALIBRATION FROM FILES ---")
+    print(f"--- STEREO CALIBRATION WITH ERROR CHECKING ---")
     print(f"Searching in: {IMAGE_FOLDER}")
-    if SWAP_CAMERAS:
-        print("⚠️ MODE: SWAPPING CAMERAS (Treating 'left' files as Right Camera)")
 
-    # 1. Find images
     left_images = sorted(glob.glob(os.path.join(IMAGE_FOLDER, "left_*.jpg")))
 
     if not left_images:
@@ -73,25 +123,30 @@ def main():
     imgpoints_l = []
     imgpoints_r = []
 
+    # Keep track of which files we actually used
+    used_filenames_l = []
+    used_filenames_r = []
+
     frame_shape = None
     valid_pairs = 0
 
-    # 2. Process Pairs
+    # 1. Process Pairs
     for fname_l in left_images:
         fname_r = fname_l.replace("left_", "right_")
 
         if not os.path.exists(fname_r):
             continue
 
-        # --- SWAP LOGIC IS HERE ---
         if SWAP_CAMERAS:
-            # Load 'Right' file into 'Left' variable
             img_l = cv2.imread(fname_r)
             img_r = cv2.imread(fname_l)
+            name_l = fname_r
+            name_r = fname_l
         else:
-            # Normal Load
             img_l = cv2.imread(fname_l)
             img_r = cv2.imread(fname_r)
+            name_l = fname_l
+            name_r = fname_r
 
         if frame_shape is None:
             frame_shape = img_l.shape[:2][::-1]
@@ -107,7 +162,6 @@ def main():
 
         if ret_l and ret_r:
             valid_pairs += 1
-            print(f"[{valid_pairs}] Used: {os.path.basename(fname_l)}")
 
             corners2_l = cv2.cornerSubPix(gray_l, corners_l, (11, 11), (-1, -1), CRITERIA)
             corners2_r = cv2.cornerSubPix(gray_r, corners_r, (11, 11), (-1, -1), CRITERIA)
@@ -116,60 +170,49 @@ def main():
             imgpoints_l.append(corners2_l)
             imgpoints_r.append(corners2_r)
 
+            used_filenames_l.append(name_l)
+            used_filenames_r.append(name_r)
+
     if valid_pairs < 5:
         print("Error: Too few valid pairs found.")
         return
 
-    # 3. Calibration
-    print("\n--- RUNNING CALIBRATION ---")
+    print(f"Used {valid_pairs} valid image pairs.")
 
-    # ---------------------------------------------------------
-    # A. INDIVIDUAL CALIBRATION
-    # ---------------------------------------------------------
+    # 2. Individual Calibration & Error Checking
+    print("\n--- ANALYZING INDIVIDUAL CAMERAS ---")
+
     print("Calibrating Left Camera...")
-    # This line DEFINES mtx_l and dist_l needed later
     rms_l, mtx_l, dist_l, rvecs_l, tvecs_l = cv2.calibrateCamera(
-        objpoints, imgpoints_l, frame_shape, None, None
+        objpoints, imgpoints_l, frame_shape, None, None, flags=INDIVIDUAL_FLAGS
     )
-    print(f" >> Left RMS: {rms_l:.4f}")
+    # CHECK PER-IMAGE ERRORS LEFT
+    errors_l = calculate_reprojection_errors(objpoints, imgpoints_l, rvecs_l, tvecs_l, mtx_l, dist_l, used_filenames_l)
+    print_bad_apples(errors_l, "LEFT CAMERA")
 
-    print("Calibrating Right Camera...")
-    # This line DEFINES mtx_r and dist_r needed later
+    print("\nCalibrating Right Camera...")
     rms_r, mtx_r, dist_r, rvecs_r, tvecs_r = cv2.calibrateCamera(
-        objpoints, imgpoints_r, frame_shape, None, None
+        objpoints, imgpoints_r, frame_shape, None, None, flags=INDIVIDUAL_FLAGS
     )
-    print(f" >> Right RMS: {rms_r:.4f}")
+    # CHECK PER-IMAGE ERRORS RIGHT
+    errors_r = calculate_reprojection_errors(objpoints, imgpoints_r, rvecs_r, tvecs_r, mtx_r, dist_r, used_filenames_r)
+    print_bad_apples(errors_r, "RIGHT CAMERA")
 
-    # ---------------------------------------------------------
-    # B. STEREO CALIBRATION
-    # ---------------------------------------------------------
-    print("Calibrating Stereo System...")
-
-    # We pass mtx_l/mtx_r as input guesses because we used CALIB_USE_INTRINSIC_GUESS (or similar)
+    # 3. Stereo Calibration
+    print("\n--- STEREO CALIBRATION ---")
     (rms_stereo, mtx_l, dist_l, mtx_r, dist_r, R, T, E, F) = cv2.stereoCalibrate(
         objpoints, imgpoints_l, imgpoints_r,
         mtx_l, dist_l, mtx_r, dist_r,
         frame_shape, flags=STEREO_FLAGS, criteria=CRITERIA
     )
 
-    print(f"\n✅ Stereo RMS Error: {rms_stereo:.4f}")
+    print(f"\n✅ Final Stereo RMS Error: {rms_stereo:.4f}")
 
-    # --- SANITY CHECK FOR SWAP ---
     x_translation = T[0][0]
-    print(f"Calculated Baseline (T[0]): {x_translation:.4f} meters")
-
-    if x_translation > 0:
-        print("\n⚠️ WARNING: T[0] is POSITIVE.")
-        print("This usually means your cameras are SWAPPED.")
-        print("Try setting SWAP_CAMERAS = True at the top of this script.")
-    else:
-        print("\nMeasurement looks correct (Right camera is to the right of Left).")
+    print(f"Calculated Baseline: {x_translation:.4f} meters")
 
     # 4. Rectification
-    print("Calculating Rectification Maps...")
-
-    # alpha=0: Zoom in (Crop black borders)
-    # alpha=1: Zoom out (Show all pixels + curved borders)
+    print("Rectifying...")
     R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(
         mtx_l, dist_l, mtx_r, dist_r,
         frame_shape, R, T,
