@@ -18,7 +18,7 @@ IMAGE_FOLDER = os.path.join(DATA_DIR, "calibration_images")
 
 # --- CAMERA ORDER SETTING ---
 # Set to True if "left_xx.jpg" is actually the RIGHT camera view
-SWAP_CAMERAS = True
+SWAP_CAMERAS = False
 
 # Flags for ESP32/Cheap Lenses
 STEREO_FLAGS = (
