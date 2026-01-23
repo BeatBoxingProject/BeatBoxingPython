@@ -215,6 +215,9 @@ def main():
 
     # 4. Rectification
     print("Rectifying...")
+    # -1 = auto
+    # 0 = crop
+    # 1 = show all
     R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(
         mtx_l, dist_l, mtx_r, dist_r,
         frame_shape, R, T,
