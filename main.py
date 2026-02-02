@@ -7,6 +7,21 @@ from core.camera import CameraStream
 from core.vision import CoordinateSmoother, find_target, apply_tilt_correction, load_calibration_data
 from core.visualizer import draw_visualizer
 
+# --- CONFIG CHECK ---
+# Ensure distinct colors are defined for each hand.
+# If these are missing from your config, define them here or add them to config.py
+try:
+    _ = HSV_LEFT_LOWER
+except NameError:
+    print("⚠️  Warning: Left/Right HSV not found in config. Using defaults.")
+    # Example: Pink for Left
+    HSV_LEFT_LOWER = np.array([140, 50, 50])
+    HSV_LEFT_UPPER = np.array([170, 255, 255])
+    # Example: Blue/Green for Right
+    HSV_RIGHT_LOWER = np.array([35, 50, 50])
+    HSV_RIGHT_UPPER = np.array([85, 255, 255])
+
+
 def main():
     # 1. Setup Network
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -16,7 +31,7 @@ def main():
     print("Starting Camera Threads...")
     cam_l = CameraStream(LEFT_CAM_URL_TRACKING, "Left")
     cam_r = CameraStream(RIGHT_CAM_URL_TRACKING, "Right")
-    time.sleep(2.0) # Allow warmup
+    time.sleep(2.0)  # Allow warmup
 
     # 3. Check Resolution & Load Calibration
     print("Checking stream resolution...")
@@ -29,7 +44,7 @@ def main():
     print(f"Detected Stream Resolution: {stream_w}x{stream_h}")
 
     calib_data = load_calibration_data(CALIB_FILE, stream_w, stream_h)
-    if calib_data is None: 
+    if calib_data is None:
         print("Calibration data missing. Please run tools/calibrate.py first.")
         return
 
@@ -47,10 +62,39 @@ def main():
     print("\nTracking started. Press 'q' to quit.")
 
     # 5. Initialize Logic
-    smoother = CoordinateSmoother(buffer_size=SMOOTHING_BUFFER_SIZE)
-    
-    # State variables for persistence
-    final_x, final_y, final_z = 0, 0, 0
+    # We need separate smoothers for Left and Right hands
+    smoother_L = CoordinateSmoother(buffer_size=SMOOTHING_BUFFER_SIZE)
+    smoother_R = CoordinateSmoother(buffer_size=SMOOTHING_BUFFER_SIZE)
+
+    # State variables for persistence (Default to 0 if hand is lost)
+    pos_L = (0.0, 0.0, 0.0)
+    pos_R = (0.0, 0.0, 0.0)
+
+    # Helper function to process a single hand's logic
+    def process_hand(target_data_l, target_data_r, smoother_obj):
+        if target_data_l and target_data_r:
+            p1 = (target_data_l[0], target_data_l[1])
+            p2 = (target_data_r[0], target_data_r[1])
+
+            # Draw circles on frames (green for valid pair)
+            cv2.circle(rect_l, p1, int(target_data_l[2]), (0, 255, 0), 2)
+            cv2.circle(rect_r, p2, int(target_data_r[2]), (0, 255, 0), 2)
+
+            # Triangulate
+            p1_np = np.array([[p1[0]], [p1[1]]], dtype=np.float64)
+            p2_np = np.array([[p2[0]], [p2[1]]], dtype=np.float64)
+            point_4d_hom = cv2.triangulatePoints(P1, P2, p1_np, p2_np)
+            point_3d = point_4d_hom / point_4d_hom[3]
+
+            raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
+
+            # Transform: Tilt -> Swap Axes (Unity)
+            cx, cy, cz = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
+            # Mapping: X->X, Z->Y (Height), Y->Z (Depth)
+            swapped_x, swapped_y, swapped_z = cx, cz, cy
+
+            return smoother_obj.update(swapped_x, swapped_y, swapped_z)
+        return None
 
     while True:
         try:
@@ -65,46 +109,36 @@ def main():
             rect_l = cv2.remap(frame_l, map_l_x, map_l_y, cv2.INTER_LINEAR)
             rect_r = cv2.remap(frame_r, map_r_x, map_r_y, cv2.INTER_LINEAR)
 
-            # Find Targets
-            target_l_data, mask_l = find_target(rect_l, HSV_LOWER, HSV_UPPER)
-            target_r_data, mask_r = find_target(rect_r, HSV_LOWER, HSV_UPPER)
+            # --- TRACK LEFT HAND ---
+            l_data_L, mask_l_L = find_target(rect_l, HSV_LEFT_LOWER, HSV_LEFT_UPPER)
+            r_data_L, mask_r_L = find_target(rect_r, HSV_LEFT_LOWER, HSV_LEFT_UPPER)
 
-            if target_l_data and target_r_data:
-                p1 = (target_l_data[0], target_l_data[1])
-                p2 = (target_r_data[0], target_r_data[1])
+            new_pos_L = process_hand(l_data_L, r_data_L, smoother_L)
+            if new_pos_L:
+                pos_L = new_pos_L  # Update persistence only if found
 
-                # Draw debug circles
-                cv2.circle(rect_l, p1, int(target_l_data[2]), (0, 255, 0), 2)
-                cv2.circle(rect_r, p2, int(target_r_data[2]), (0, 255, 0), 2)
+            # --- TRACK RIGHT HAND ---
+            l_data_R, mask_l_R = find_target(rect_l, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER)
+            r_data_R, mask_r_R = find_target(rect_r, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER)
 
-                # Triangulate
-                p1_np = np.array([[p1[0]], [p1[1]]], dtype=np.float64)
-                p2_np = np.array([[p2[0]], [p2[1]]], dtype=np.float64)
-                point_4d_hom = cv2.triangulatePoints(P1, P2, p1_np, p2_np)
-                point_3d = point_4d_hom / point_4d_hom[3]
+            new_pos_R = process_hand(l_data_R, r_data_R, smoother_R)
+            if new_pos_R:
+                pos_R = new_pos_R
 
-                raw_x, raw_y, raw_z = point_3d[0][0], point_3d[1][0], point_3d[2][0]
+            # --- SEND DATA ---
+            # Format: "Lx,Ly,Lz|Rx,Ry,Rz"
+            # We use 2 decimal places to keep packet size small
+            message = f"{pos_L[0]:.2f},{pos_L[1]:.2f},{pos_L[2]:.2f}|{pos_R[0]:.2f},{pos_R[1]:.2f},{pos_R[2]:.2f}"
+            sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
 
-                # Transform Coordinates
-                # 1. Tilt Correction
-                cx, cy, cz = apply_tilt_correction(raw_x, raw_y, raw_z, CAMERA_TILT_ANGLE)
+            # --- VISUALIZE ---
+            # Note: Visualizer currently only draws one point.
+            # Update 'draw_visualizer' to accept two sets of coordinates if needed.
+            vis_frame = draw_visualizer(pos_L[0], pos_L[1], pos_L[2])
 
-                # 2. Swap Axes for Unity (Unity Y is Up, Unity Z is Forward)
-                # We map: Python X -> Unity X, Python Z -> Unity Y, Python Y -> Unity Z
-                swapped_x, swapped_y, swapped_z = cx, cz, cy
-
-                # 3. Smoothing
-                final_x, final_y, final_z = smoother.update(swapped_x, swapped_y, swapped_z)
-
-                # Send Data
-                message = f"{final_x},{final_y},{final_z}"
-                sock.sendto(message.encode(), (UDP_IP, UDP_PORT))
-
-            # Visualization
-            vis_frame = draw_visualizer(final_x, final_y, final_z)
-            cv2.imshow('3D Data Visualizer', vis_frame)
-            cv2.imshow('Rectified Left', rect_l)
-            cv2.imshow('Rectified Right', rect_r)
+            cv2.imshow('3D Data', vis_frame)
+            cv2.imshow('Left Eye', rect_l)
+            cv2.imshow('Right Eye', rect_r)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -116,6 +150,7 @@ def main():
     cam_l.stop()
     cam_r.stop()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
