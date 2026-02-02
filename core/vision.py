@@ -29,7 +29,7 @@ def apply_tilt_correction(x, y, z, angle_degrees):
     z_new = y * math.sin(theta) + z * math.cos(theta)
     return x, y_new, z_new
 
-def find_target(frame, hsv_lower, hsv_upper):
+def find_target(frame, hsv_lower, hsv_upper, min_radius=10):
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv_frame, hsv_lower, hsv_upper)
     mask = cv2.erode(mask, None, iterations=2)
@@ -41,7 +41,7 @@ def find_target(frame, hsv_lower, hsv_upper):
     if len(contours) > 0:
         c = max(contours, key=cv2.contourArea)
         ((x, y), radius) = cv2.minEnclosingCircle(c)
-        if radius > 10:
+        if radius > min_radius:
             found_target = (int(x), int(y), int(radius))
             
     return found_target, mask

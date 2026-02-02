@@ -110,16 +110,16 @@ def main():
             rect_r = cv2.remap(frame_r, map_r_x, map_r_y, cv2.INTER_LINEAR)
 
             # --- TRACK LEFT HAND ---
-            l_data_L, mask_l_L = find_target(rect_l, HSV_LEFT_LOWER, HSV_LEFT_UPPER)
-            r_data_L, mask_r_L = find_target(rect_r, HSV_LEFT_LOWER, HSV_LEFT_UPPER)
+            l_data_L, mask_l_L = find_target(rect_l, HSV_LEFT_LOWER, HSV_LEFT_UPPER, TRACKING_MIN_RADIUS)
+            r_data_L, mask_r_L = find_target(rect_r, HSV_LEFT_LOWER, HSV_LEFT_UPPER, TRACKING_MIN_RADIUS)
 
             new_pos_L = process_hand(l_data_L, r_data_L, smoother_L)
             if new_pos_L:
                 pos_L = new_pos_L  # Update persistence only if found
 
             # --- TRACK RIGHT HAND ---
-            l_data_R, mask_l_R = find_target(rect_l, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER)
-            r_data_R, mask_r_R = find_target(rect_r, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER)
+            l_data_R, mask_l_R = find_target(rect_l, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER, TRACKING_MIN_RADIUS)
+            r_data_R, mask_r_R = find_target(rect_r, HSV_RIGHT_LOWER, HSV_RIGHT_UPPER, TRACKING_MIN_RADIUS)
 
             new_pos_R = process_hand(l_data_R, r_data_R, smoother_R)
             if new_pos_R:

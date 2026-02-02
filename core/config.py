@@ -28,11 +28,15 @@ CALIB_FILE = os.path.join(DATA_DIR, "stereo_calib.yml")
 
 # COLORS
 # Left Hand (Green)
-HSV_LEFT_LOWER = np.array([35, 42, 119])
-HSV_LEFT_UPPER = np.array([66, 255, 255])
+HSV_LEFT_LOWER = np.array([47, 61, 78])
+HSV_LEFT_UPPER = np.array([69, 255, 255])
 # Right Hand (Blue)
-HSV_RIGHT_LOWER = np.array([80, 80, 147])
+HSV_RIGHT_LOWER = np.array([81, 82, 116])
 HSV_RIGHT_UPPER = np.array([179, 255, 255])
+
+# Minimum size (radius in pixels) for the object to be detected
+# Lower this if detection fails at long distance.
+TRACKING_MIN_RADIUS = 5
 
 # Geometry
 CAMERA_TILT_ANGLE = 25
