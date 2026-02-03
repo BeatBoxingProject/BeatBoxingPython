@@ -120,6 +120,7 @@ python main.py
 <p align="center">
   <img src="docs/images/step4_vis.png" width="600" alt="Final Visualizer output">
 </p>
+
 ## 🎮 Unity Integration
 
 The system now broadcasts a **split string** via UDP containing data for both hands.
