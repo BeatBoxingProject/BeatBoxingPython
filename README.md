@@ -1,4 +1,4 @@
-## 🚀 Stereoscopic Hand Tracking System
+## 👁️ Stereoscopic Hand Tracking System
 
 The system captures video from two **ESP32-CAM** modules, processes the data using Python (OpenCV), and calculates the 3D coordinates ($X, Y, Z$) for **two separate hands** simultaneously. This data is streamed to Unity via UDP in real-time.
 
