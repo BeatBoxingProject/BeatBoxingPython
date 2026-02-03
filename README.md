@@ -1,6 +1,6 @@
 ## 🚀 Project Overview
 
-The system captures video from two **ESP32-CAM** modules, processes the data using Python (OpenCV), and calculates the 3D coordinates ($X, Y, Z$) for **two separate hands** (Left & Right) simultaneously. This data is streamed to Unity via UDP in real-time.
+The system captures video from two **ESP32-CAM** modules, processes the data using Python (OpenCV), and calculates the 3D coordinates ($X, Y, Z$) for **two separate hands** simultaneously. This data is streamed to Unity via UDP in real-time.
 
 ### Key Features
 
@@ -8,7 +8,7 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 * **Stereoscopic Depth:** Uses triangulation to calculate true 3D depth, not just 2D position.
 * **Lag-Free Threading:** Custom `CameraStream` classes run video fetching in background threads to prevent network latency from blocking the processing loop.
 * **Robust Reconnection:** The system (including the calibration tool) automatically attempts to reconnect if a camera drops off the network.
-* **Tilt Correction:** Mathematically rotates the 3D world to account for the cameras being mounted at a ~40-50° angle.
+* **Tilt Correction:** Mathematically rotates the 3D world to account for the cameras being mounted at a ~65° angle.
 * **Visualizer:** Includes a real-time, side-by-side 3D bar chart to debug tracking boundaries and "Searching..." states without needing to look at Unity.
 
 ## 🛠 Hardware Setup
@@ -16,7 +16,7 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 1. **Cameras:** 2x **ESP32-CAM** modules (configured as MJPEG streamers).
 
 2. **Mounting:** Ceiling or high-rig mount.
-   * **Position:** Top-down, angled \~40-50° downwards towards the play area.
+   * **Position:** Top-down, angled \~65° downwards towards the play area.
    * **Alignment:** Cameras should be roughly parallel.
 
 3. **Controllers:** **Two** distinctly colored boxing gloves (e.g., one Green, one Pink). *Avoid colors that blend into your background.*
@@ -30,7 +30,7 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 | main.py | **The Main Engine.** Run this to start the stereo tracking system. |
 | core/ | **Library Logic.** Contains the camera threads (`camera.py`), math/logic (`vision.py`), visualizer (`visualizer.py`), and settings (`config.py`). |
 | tools/align\_cameras.py | **Step 1:** Visual aid to physically aim the cameras so they overlap correctly. |
-| tools/calibrate.py | **Step 2:** Uses a checkerboard to calculate lens distortion and stereo geometry. Now supports auto-reconnect. |
+| tools/calibrate.py | **Step 2:** Uses a checkerboard to calculate lens distortion and stereo geometry. |
 | tools/color\_tuner.py | **Step 3:** A tool with sliders to find the perfect HSV color values for your gloves. |
 | data/stereo\_calib.yml | **Generated File.** Stores the intrinsic and extrinsic camera matrices (created by Step 2). |
 
@@ -115,7 +115,7 @@ python main.py
 ```
 
 * This script connects to the cameras, applies calibration, tracks **both** gloves, and sends UDP packets to `127.0.0.1:5005`.
-* **Visualizer:** Watch the "3D Data" window. It will show two distinct bar charts. If a hand is lost, it will display "SEARCHING...".
+* **Visualizer:** Watch the "3D Data" window. It will show bar charts to debug the tracking.
 
 <p align="center">
   <img src="docs/images/step4_vis.png" width="600" alt="Final Visualizer output">
@@ -154,7 +154,7 @@ string[] rightPos = hands[1].Split(',');
 
 ### Coordinate Rotation
 
-Because the cameras are angled down at ~40-50°, a raw Z-depth calculation would result in the coordinate moving "down" as you punch "forward". The `StereoCamera` class (in `core/vision.py`) uses a rotation matrix to correct this:
+Because the cameras are angled down at ~65°, a raw Z-depth calculation would result in the coordinate moving "down" as you punch "forward". The `StereoCamera` class (in `core/vision.py`) uses a rotation matrix to correct this:
 
 $$
 y_{new} = y \cdot \cos(\theta) - z \cdot \sin(\theta)
