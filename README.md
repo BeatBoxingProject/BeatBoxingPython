@@ -11,7 +11,7 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 * **Tilt Correction:** Mathematically rotates the 3D world to account for the cameras being mounted at a ~65° angle.
 * **Visualizer:** Includes a real-time, side-by-side 3D bar chart to debug tracking boundaries and "Searching..." states without needing to look at Unity.
 
-## 🛠 Hardware Setup
+## 🛠️ Hardware Setup
 
 1. **Cameras:** 2x **ESP32-CAM** modules (configured as MJPEG streamers).
 
