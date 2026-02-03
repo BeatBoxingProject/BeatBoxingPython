@@ -1,6 +1,6 @@
 ## 🚀 Project Overview
 
-The system captures video from two **ESP32-CAM** modules, processes the data using Python (OpenCV), calculates the 3D coordinates ($X, Y, Z$) of the glove, and streams this data to Unity via UDP in real-time.
+The system captures video from two **ESP32-CAM** modules, processes the data using Python (OpenCV), calculates the 3D coordinates ($X, Y, Z$) of the gloves, and streams this data to Unity via UDP in real-time.
 
 ### Key Features
 
@@ -8,9 +8,9 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 
 * **Lag-Free Threading:** Custom `CameraStream` classes run video fetching in background threads to prevent network latency from blocking the processing loop.
 
-* **Tilt Correction:** Mathematically rotates the 3D world to account for the cameras being mounted at a 50° angle.
+* **Tilt Correction:** Mathematically rotates the 3D world to account for the cameras being mounted at a downwards angle.
 
-* **Visualizer:** Includes a real-time 3D bar chart to debug tracking boundaries without needing to look at Unity.
+* **Visualizer:** Includes a real-time 3D bar chart to debug tracking boundaries.
 
 ## 🛠 Hardware Setup
 
@@ -18,11 +18,11 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 
 2. **Mounting:** Ceiling or high-rig mount.
 
-   * **Position:** Top-down, angled \~50° downwards towards the play area.
+   * **Position:** Top-down, angled \~65° downwards towards the play area.
 
    * **Alignment:** Cameras should be roughly parallel.
 
-3. **Controller:** A colored boxing glove.
+3. **Controller:** Two boxing gloves of different colors.
 
 4. **Network:** A dedicated 2.4GHz WiFi hotspot is recommended for low latency.
 
@@ -34,7 +34,7 @@ The system captures video from two **ESP32-CAM** modules, processes the data usi
 | core/ | **Library Logic.** Contains the camera threads (camera.py), math (vision.py), and settings (config.py). |
 | tools/align\_cameras.py | **Step 1:** Visual aid to physically aim the cameras so they overlap correctly. |
 | tools/calibrate.py | **Step 2:** Uses a checkerboard to calculate lens distortion and stereo geometry. |
-| tools/color\_tuner.py | **Step 3:** A tool with sliders to find the perfect HSV color values for your glove. |
+| tools/color\_tuner.py | **Step 3:** A tool with sliders to find the perfect HSV color values for your gloves. |
 | data/stereo\_calib.yml | **Generated File.** Stores the intrinsic and extrinsic camera matrices (created by Step 2). |
 
 ## ⚙️ Installation & Requirements
@@ -89,7 +89,7 @@ python tools/calibrate.py
 
 ### 3. Color Tuning
 
-Run the tuner to isolate your glove from the background.
+Run the tuner to isolate your gloves from the background.
 
 ```bash
 python tools/color_tuner.py
@@ -136,7 +136,7 @@ To receive this in Unity:
 
 ### Coordinate Rotation
 
-Because the cameras are angled down at 50°, a raw Z-depth calculation would result in the coordinate moving "down" as you punch "forward". The `apply_tilt_correction` function (in `core/vision.py`) uses a rotation matrix to correct this:
+Because the cameras are angled down, a raw Z-depth calculation would result in the coordinate moving "down" as you punch "forward". The `apply_tilt_correction` function (in `core/vision.py`) uses a rotation matrix to correct this:
 
 $$
 y_{new} = y \cdot \cos(\theta) - z \cdot \sin(\theta)
